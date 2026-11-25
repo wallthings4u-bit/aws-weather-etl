@@ -22,3 +22,6 @@ venv/
 # OS & Temp
 .DS_Store
 response.json
+
+# Personal Memo
+*memo*.txt

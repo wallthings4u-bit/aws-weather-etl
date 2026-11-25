@@ -8,7 +8,7 @@ resource "aws_iam_role" "lambda_exec_role" {
         Action = "sts:AssumeRole"
         Effect = "Allow"
         Principal = {
-          Service = "://amazonaws.com"
+          Service = "lambda.amazonaws.com"
         }
       }
     ]
@@ -59,7 +59,7 @@ resource "aws_iam_role" "scheduler_exec_role" {
         Action = "sts:AssumeRole"
         Effect = "Allow"
         Principal = {
-          Service = "://amazonaws.com"
+          Service = "scheduler.amazonaws.com"
         }
       }
     ]

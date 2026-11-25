@@ -49,7 +49,7 @@ def fetch_weather_data() -> list[dict]:
     lats = ",".join(str(c["lat"]) for c in CITIES)
     lons = ",".join(str(c["lon"]) for c in CITIES)
 
-    url = "https://open-meteo.com"
+    url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lats,
         "longitude": lons,

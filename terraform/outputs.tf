@@ -12,3 +12,13 @@ output "lambda_function_name" {
   description = "作成されたLambda関数名"
   value       = aws_lambda_function.weather_ingestor.function_name
 }
+
+output "glue_database_name" {
+  description = "Glue Catalog データベース名"
+  value       = aws_glue_catalog_database.weather_db.name
+}
+
+output "athena_workgroup_name" {
+  description = "Athena ワークグループ名"
+  value       = aws_athena_workgroup.weather_wg.name
+}

@@ -192,6 +192,26 @@ def main():
     latest = city_df.iloc[-1]
     st.subheader(f"🗄️ {selected_city} の日次バッチ最新データ（{latest['date'].strftime('%Y-%m-%d')} / Athena蓄積）")
 
+    # --- ここから追加：日次バッチ稼働ステータス表示 ---
+    latest_fetched_raw = df["fetched_at"].dropna().max()
+    if pd.notna(latest_fetched_raw):
+        latest_fetched_dt = pd.to_datetime(latest_fetched_raw)
+        # タイムゾーンなし（UTC想定）の場合はJSTへ変換、すでにある場合はJSTへ統一
+        if latest_fetched_dt.tzinfo is None:
+            latest_fetched_jst = latest_fetched_dt.tz_localize("UTC").tz_convert("Asia/Tokyo")
+        else:
+            latest_fetched_jst = latest_fetched_dt.tz_convert("Asia/Tokyo")
+
+        hours_diff = (datetime.now(ZoneInfo("Asia/Tokyo")) - latest_fetched_jst).total_seconds() / 3600
+        formatted_time = latest_fetched_jst.strftime("%Y-%m-%d %H:%M JST")
+
+        if hours_diff <= 26:
+            st.success(f"✅ **日次ETLバッチ正常稼働中** ｜ 最終データ取得日時: `{formatted_time}`（全 {len(df['city'].unique())} 都市同期済み）")
+        else:
+            st.warning(f"⚠️ **バッチ更新遅延の可能性** ｜ 最終データ取得日時: `{formatted_time}`（26時間以上更新がありません）")
+
+    # --- ここまで追加 ---
+
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("日次天気予報", latest["weather_desc"])

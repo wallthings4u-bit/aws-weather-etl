@@ -50,11 +50,11 @@ def fetch_weather_data() -> list[dict]:
     lats = ",".join(str(c["lat"]) for c in CITIES)
     lons = ",".join(str(c["lon"]) for c in CITIES)
 
-    url = "https://api.open-meteo.com/v1/forecast"
+    url = "https://open-meteo.com"
     params = {
         "latitude": lats,
         "longitude": lons,
-        "daily": "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset",
+        "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,relative_humidity_2m_mean,sunrise,sunset",
         "timezone": "Asia/Tokyo",
         "forecast_days": 1,
     }
@@ -74,6 +74,9 @@ def transform_to_parquet(raw_data: list[dict], now_jst: datetime) -> tuple[str, 
         target_date = daily["time"][0]
         code = int(daily["weather_code"][0])
 
+        precip = daily.get("precipitation_sum", [0.0])[0]
+        humidity = daily.get("relative_humidity_2m_mean", [0.0])[0]
+
         records.append({
             "date": target_date,
             "city": city_info["name"],
@@ -81,6 +84,8 @@ def transform_to_parquet(raw_data: list[dict], now_jst: datetime) -> tuple[str, 
             "weather_desc": WMO_WEATHER_MAP.get(code, "その他"),
             "temp_max": float(daily["temperature_2m_max"][0]),
             "temp_min": float(daily["temperature_2m_min"][0]),
+            "precipitation_sum": float(precip if precip is not None else 0.0),
+            "humidity_mean": float(humidity if humidity is not None else 0.0),
             "sunrise": daily["sunrise"][0],
             "sunset": daily["sunset"][0],
             "fetched_at": now_jst.isoformat(),

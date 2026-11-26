@@ -79,6 +79,15 @@ resource "aws_glue_catalog_table" "weather_daily" {
       type = "double"
     }
     columns {
+      name = "precipitation_sum"
+      type = "double"
+    }
+    columns {
+      name = "humidity_mean"
+      type = "double"
+    }
+
+    columns {
       name = "sunrise"
       type = "string"
     }

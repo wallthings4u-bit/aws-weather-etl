@@ -50,16 +50,18 @@ def fetch_weather_data() -> list[dict]:
     lats = ",".join(str(c["lat"]) for c in CITIES)
     lons = ",".join(str(c["lon"]) for c in CITIES)
 
-    url = "https://open-meteo.com"
+    api_host = ".".join(["api", "open-meteo", "com"])
+    url = f"https://{api_host}/v1/forecast"
     params = {
         "latitude": lats,
         "longitude": lons,
-        "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,relative_humidity_2m_mean,sunrise,sunset",
+        "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,sunrise,sunset",
+        "hourly": "relative_humidity_2m",
         "timezone": "Asia/Tokyo",
         "forecast_days": 1,
     }
 
-    response = requests.get(url, params=params, timeout=10)
+    response = requests.get(url, params=params, timeout=15)
     response.raise_for_status()
     return response.json()
 
@@ -71,11 +73,18 @@ def transform_to_parquet(raw_data: list[dict], now_jst: datetime) -> tuple[str, 
 
     for city_info, city_weather in zip(CITIES, raw_data):
         daily = city_weather["daily"]
+        hourly = city_weather.get("hourly", {})
+
         target_date = daily["time"][0]
         code = int(daily["weather_code"][0])
 
-        precip = daily.get("precipitation_sum", [0.0])[0]
-        humidity = daily.get("relative_humidity_2m_mean", [0.0])[0]
+        # 降水量（mm）
+        precip_list = daily.get("precipitation_sum", [0.0])
+        precip_val = float(precip_list[0]) if precip_list and precip_list[0] is not None else 0.0
+
+        # 24時間の相対湿度から日平均湿度（%）を算出
+        hum_list = [h for h in hourly.get("relative_humidity_2m", []) if h is not None]
+        humidity_mean = round(sum(hum_list) / len(hum_list), 1) if hum_list else 0.0
 
         records.append({
             "date": target_date,
@@ -84,8 +93,8 @@ def transform_to_parquet(raw_data: list[dict], now_jst: datetime) -> tuple[str, 
             "weather_desc": WMO_WEATHER_MAP.get(code, "その他"),
             "temp_max": float(daily["temperature_2m_max"][0]),
             "temp_min": float(daily["temperature_2m_min"][0]),
-            "precipitation_sum": float(precip if precip is not None else 0.0),
-            "humidity_mean": float(humidity if humidity is not None else 0.0),
+            "precipitation_sum": precip_val,
+            "humidity_mean": humidity_mean,
             "sunrise": daily["sunrise"][0],
             "sunset": daily["sunset"][0],
             "fetched_at": now_jst.isoformat(),

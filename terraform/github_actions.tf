@@ -1,8 +1,18 @@
+locals {
+  github_oidc_host = join(".", ["token", "actions", "githubusercontent", "com"])
+  sts_audience     = join(".", ["sts", "amazonaws", "com"])
+}
+
 # 1. GitHub OIDC プロバイダの登録
 resource "aws_iam_openid_connect_provider" "github" {
-  url             = "https://githubusercontent.com"
-  client_id_list  = ["://amazonaws.com"]
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1", "1c58a3a8518e8759bf075b76b750d4f2df264fcd"]
+  url             = "https://${local.github_oidc_host}"
+  client_id_list  = [local.sts_audience]
+  thumbprint_list = [
+    "d367a47959a77b088bec4fe3e7dd3ec9ba733ab5",
+    "6938fd4d98bab03faadb97b34396831e3780aea1",
+    "1c58a3a8518e8759bf075b76b750d4f2df264fcd",
+    "d89e3bd43d5d909b47a18977aa9d5ce36cee184c"
+  ]
 }
 
 # 2. GitHub Actions 用 IAM ロール（特定リポジトリの main ブランチのみ許可）
@@ -20,10 +30,10 @@ resource "aws_iam_role" "github_actions_deploy" {
         Action = "sts:AssumeRoleWithWebIdentity"
         Condition = {
           StringEquals = {
-            "://githubusercontent.com:aud" = "://amazonaws.com"
+            "${local.github_oidc_host}:aud" = local.sts_audience
           }
           StringLike = {
-            "://githubusercontent.com:sub" = "repo:wallthings4u-bit/aws-weather-etl:*"
+            "${local.github_oidc_host}:sub" = "repo:wallthings4u-bit@267817252/aws-weather-etl@1471420168:ref:refs/heads/main"
           }
         }
       }
@@ -71,7 +81,7 @@ resource "aws_iam_role_policy" "github_actions_policy" {
   })
 }
 
-# 4. 作成されたロールARNの出力（GitHub Actionsのワークフローで使用）
+# 4. 作成されたロールARNの出力
 output "github_actions_role_arn" {
   description = "IAM Role ARN for GitHub Actions OIDC"
   value       = aws_iam_role.github_actions_deploy.arn

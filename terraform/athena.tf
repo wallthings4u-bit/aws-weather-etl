@@ -111,3 +111,4 @@ resource "aws_athena_workgroup" "weather_wg" {
     }
   }
 }
+

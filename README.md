@@ -1,6 +1,6 @@
 # AWS Serverless Weather Data ETL Pipeline (`aws-weather-etl`)
 
-日本主要5都市（札幌・東京・大阪・松山・福岡）の日次気象データを外部APIから自動収集し、分析最適化された **Apache Parquet** 形式で Amazon S3 データレイクへ蓄積、Amazon Athena で即座に SQL 分析できるサーバーレス ETL パイプラインです。
+日本主要5都市（札幌・東京・大阪・松山・福岡）の日次気象データを外部APIから自動収集し、分析最適化された **Apache Parquet** 形式で Amazon S3 データレイクへ蓄積、Amazon Athena でのデータ基盤構築から **Streamlit BIダッシュボード** での可視化までを一貫して行えるサーバーレス ETL パイプラインです。
 
 インフラ構築からデータカタログ定義まで、すべて **Terraform (IaC)** でコード化しています。
 
@@ -18,6 +18,7 @@ flowchart LR
     Glue[AWS Glue Data Catalog<br/>Partition Projection] -.->|スキーマ・パーティション定義| S3
     Athena[Amazon Athena<br/>SQL分析] -->|クエリ実行| S3
     Athena -->|クエリ結果出力| S3
+    Athena -->|awswrangler経由でデータ取得| Streamlit[Streamlit BI Dashboard<br/>都市別サマリー・気温推移グラフ]
 ```
 
 ---
@@ -40,6 +41,8 @@ flowchart LR
 5. **セキュリティと最小権限の原則（IAM）**
    - Lambda 実行ロールには対象 S3 バケットの `raw/*` プレフィックスへの `PutObject` と CloudWatch Logs 出力のみを許可しています。
    - S3 バケットのパブリックアクセス全ブロック、SSE-S3 暗号化、および Athena ワークグループ側での暗号化強制を有効化しています。
+6. **サーバーレスBIダッシュボード（Streamlit + AWS SDK for pandas）**
+   - `awswrangler` を用いて Athena ワークグループ経由で直接データレイクをクエリし、都市別の最新気象サマリー・最高/最低気温推移グラフ・履歴データをインタラクティブに可視化します。
 
 ---
 
@@ -53,6 +56,7 @@ flowchart LR
 | **Orchestration** | Amazon EventBridge Scheduler | タイムゾーン指定（`Asia/Tokyo`）での定期実行 |
 | **Storage** | Amazon S3 | パーティション構成データレイク・クエリ結果保存 |
 | **Data Catalog / Query** | AWS Glue Data Catalog, Amazon Athena | メタデータ管理・サーバーレスSQL分析 |
+| **BI / Visualization** | Streamlit, awswrangler, Plotly | Athenaデータ取得・インタラクティブ可視化 |
 | **External API** | Open-Meteo Forecast API | 日本5都市の気象データ取得（APIキー不要） |
 
 ---
@@ -65,39 +69,21 @@ aws-weather-etl/
 ├── .gitignore
 ├── src/
 │   ├── Dockerfile             # public.ecr.aws/lambda/python:3.12 ベース
-│   ├── requirements.txt       # Python依存ライブラリ
+│   ├── requirements.txt       # Lambda用Python依存ライブラリ
 │   └── handler.py             # ETL処理本体（Extract / Transform / Load）
-└── terraform/
-    ├── main.tf                # Provider設定
-    ├── variables.tf           # 変数定義
-    ├── ecr.tf                 # ECRリポジトリ・ライフサイクルポリシー
-    ├── s3.tf                  # S3バケット・暗号化・ライフサイクル設定
-    ├── iam.tf                 # Lambda最小権限IAMロール・ポリシー
-    ├── lambda.tf              # Lambda関数・CloudWatch Logs設定
-    ├── eventbridge.tf         # EventBridge Scheduler設定
-    ├── athena.tf              # Glue Data Catalog・Athena Workgroup設定
-    └── outputs.tf             # 出力値定義
-```
-
----
-
-## 📊 Amazon Athena 分析クエリ例
-
-5都市の最高・最低気温の比較、日較差（寒暖差）、および経度差による日の出・日の入り時刻の違いを分析するクエリ例です。
-
-```sql
-SELECT
-  date,
-  city,
-  weather_desc,
-  temp_max,
-  temp_min,
-  ROUND(temp_max - temp_min, 1) AS temp_diff,
-  substr(sunrise, 12, 5) AS sunrise_time,
-  substr(sunset, 12, 5) AS sunset_time
-FROM weather_pipeline_db.weather_daily
-WHERE year = '2026' AND month = '11' AND day = '25'
-ORDER BY temp_max DESC;
+├── terraform/
+│   ├── main.tf                # Provider設定
+│   ├── variables.tf           # 変数定義
+│   ├── ecr.tf                 # ECRリポジトリ・ライフサイクルポリシー
+│   ├── s3.tf                  # S3バケット・暗号化・ライフサイクル設定
+│   ├── iam.tf                 # Lambda最小権限IAMロール・ポリシー
+│   ├── lambda.tf              # Lambda関数・CloudWatch Logs設定
+│   ├── eventbridge.tf         # EventBridge Scheduler設定
+│   ├── athena.tf              # Glue Data Catalog・Athena Workgroup設定
+│   └── outputs.tf             # 出力値定義
+└── dashboard/
+    ├── app.py                 # Streamlit BIダッシュボード本体
+    └── requirements.txt       # ダッシュボード用Python依存ライブラリ
 ```
 
 ---
@@ -108,6 +94,7 @@ ORDER BY temp_max DESC;
 - AWS CLI（認証設定済み）
 - Terraform (`>= 1.5`)
 - Docker
+- Python 3.12+（BIダッシュボード起動用）
 
 ### 1. ECRリポジトリの先行作成
 ```bash
@@ -121,7 +108,7 @@ terraform apply -target=aws_ecr_repository.lambda_repo
 ```bash
 AWS_ACCOUNT_ID=\$(aws sts get-caller-identity --query Account --output text)
 REGION="ap-northeast-1"
-REPO_URI="\({AWS_ACCOUNT_ID}.dkr.ecr.\){REGION}://"
+REPO_URI=\$(terraform output -raw ecr_repository_url)
 
 aws ecr get-login-password --region \${REGION} | docker login --username AWS --password-stdin \({AWS_ACCOUNT_ID}.dkr.ecr.\){REGION}.amazonaws.com
 
@@ -136,3 +123,23 @@ docker push \${REPO_URI}:latest
 cd ../terraform
 terraform apply
 ```
+
+---
+
+## 📈 BIダッシュボードの起動手順（ローカル）
+
+構築したデータレイク（Amazon Athena）のデータを可視化する Streamlit ダッシュボードを起動します。
+
+```bash
+# 1. 仮想環境の作成と依存ライブラリのインストール
+python3 -m venv .venv-dashboard
+source .venv-dashboard/bin/activate
+pip install -r dashboard/requirements.txt
+
+# 2. Terraformの出力値を参照してダッシュボードを起動
+ATHENA_DATABASE=\$(terraform -chdir=terraform output -raw glue_database_name) \
+ATHENA_WORKGROUP=\$(terraform -chdir=terraform output -raw athena_workgroup_name) \
+streamlit run dashboard/app.py
+```
+
+起動後、ブラウザで `http://localhost:8501` にアクセスすると、都市別の最新気象サマリーおよび気温推移グラフを確認できます。

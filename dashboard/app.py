@@ -27,6 +27,7 @@ CITY_COORDS = [
     (["大阪", "osaka"], {"lat": 34.6937, "lon": 135.5023}),
     (["松山", "matsuyama"], {"lat": 33.8392, "lon": 132.7657}),
     (["福岡", "fukuoka"], {"lat": 33.5902, "lon": 130.4017}),
+    (["那覇", "naha"], {"lat": 26.2124, "lon": 127.6809}),
 ]
 
 def get_city_coords(city_name: str) -> dict | None:

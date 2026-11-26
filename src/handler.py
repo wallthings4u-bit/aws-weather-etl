@@ -20,6 +20,7 @@ CITIES = [
     {"name": "Osaka", "lat": 34.6937, "lon": 135.5023},
     {"name": "Matsuyama", "lat": 33.8392, "lon": 132.7656},
     {"name": "Fukuoka", "lat": 33.5902, "lon": 130.4017},
+    {"name": "Naha", "lat": 26.2124, "lon": 127.6809},
 ]
 
 WMO_WEATHER_MAP = {

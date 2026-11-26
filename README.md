@@ -56,7 +56,12 @@ flowchart LR
    - S3 バケットのパブリックアクセス全ブロック、SSE-S3 暗号化、および Athena ワークグループ側での暗号化強制を有効化しています。
 6. **リアルタイム＆バッチのハイブリッド可視化（Streamlit）**
    - ダッシュボード表示時に Open-Meteo API から現在時刻の最新気象を即時取得して表示しつつ、Athena に蓄積された日次履歴データの推移グラフもあわせて確認できます。
-
+7. **サーバーレス監視とハイブリッド可視化（CloudWatch Alarm + SNS / Streamlit）**
+   - Lambda 関数の `Errors` メトリクスを CloudWatch Alarm で常時監視し、バッチ処理失敗時には Amazon SNS 経由で即座にメール通知を行う異常検知体制を構築しました。
+   - 正常時は Streamlit ダッシュボード上に最終バッチ実行日時と全都市の同期完了ステータスを表示し、異常時のみプッシュ通知を行うことで運用者の通知疲れを防止しています。
+8. **OIDC 認証 ＆ 自動ロールバック付き CI/CD パイプライン（GitHub Actions）**
+   - 長期的な AWS アクセスキーを一切保持せず、GitHub OIDC と最小権限 IAM ロール（特定リポジトリの `main` ブランチのみ許可）による一時クレデンシャル認証を採用しました。
+   - `src/` 配下のコード変更をプッシュすると、Docker イメージのビルド（Lambda 互換マニフェスト指定）・ECR プッシュ・Lambda 更新後に**自動スモークテスト（`aws lambda invoke`）**を実行し、エラー検知時は直前の正常イメージへ**自動ロールバック**する自己修復型デプロイを実現しています。
 ---
 
 ## 🛠 使用技術スタック
@@ -99,6 +104,14 @@ aws-weather-etl/
 └── dashboard/
     ├── app.py                 # Streamlit BIダッシュボード本体
     └── requirements.txt       # ダッシュボード用Python依存ライブラリ
+├── .github/
+│   └── workflows/
+│       └── deploy.yml       # GitHub Actions CI/CD（OIDC認証・スモークテスト・自動ロールバック）
+...
+├── terraform/
+│   ├── monitoring.tf        # CloudWatch Alarm・SNS 障害メール通知設定
+│   ├── github_actions.tf    # GitHub OIDC プロバイダ・最小権限デプロイ用IAMロール設定
+
 ```
 
 ---

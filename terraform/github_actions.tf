@@ -74,7 +74,8 @@ resource "aws_iam_role_policy" "github_actions_policy" {
         Action = [
           "lambda:UpdateFunctionCode",
           "lambda:GetFunction",
-          "lambda:GetFunctionConfiguration"
+          "lambda:GetFunctionConfiguration",
+          "lambda:InvokeFunction"
         ]
         Resource = aws_lambda_function.weather_ingestor.arn
       }

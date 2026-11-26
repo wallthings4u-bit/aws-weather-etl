@@ -20,7 +20,7 @@ env:
 
 jobs:
   deploy:
-    name: Build and Deploy to AWS Lambda
+    name: Build, Deploy, Smoke Test & Auto-Rollback
     runs-on: ubuntu-latest
 
     steps:
@@ -32,12 +32,19 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::493309513612:role/aws-weather-etl-github-actions-role
           role-session-name: GitHubActionsDeploy
-          audience: sts.amazonaws.com
+          audience: ://amazonaws.com
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get current running Lambda image URI (for rollback)
+        id: current-image
+        run: |
+          PREV_URI=$(aws lambda get-function --function-name ${{ env.LAMBDA_FUNCTION_NAME }} --region ${{ env.AWS_REGION }} --query 'Code.ImageUri' --output text)
+          echo "prev_image_uri=$PREV_URI" >> $GITHUB_OUTPUT
+          echo "Saved previous image URI: $PREV_URI"
 
       - name: Build, tag, and push Docker image to Amazon ECR
         id: build-image
@@ -62,3 +69,34 @@ jobs:
           aws lambda wait function-updated \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
             --region ${{ env.AWS_REGION }}
+
+      - name: Smoke Test (Invoke Lambda) & Auto-Rollback on Failure
+        run: |
+          echo "Running smoke test on newly deployed Lambda..."
+          STATUS_CODE=$(aws lambda invoke \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --payload '{}' \
+            --cli-binary-format raw-in-base64-out \
+            response.json \
+            --query 'StatusCode' \
+            --output text)
+
+          cat response.json
+          echo ""
+
+          # FunctionErrorが含まれている、またはHTTPステータスが200以外の場合はロールバック
+          if grep -q "errorMessage" response.json || [ "$STATUS_CODE" != "200" ]; then
+            echo "❌ Smoke test failed! Rolling back to previous image: ${{ steps.current-image.outputs.prev_image_uri }}"
+            aws lambda update-function-code \
+              --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+              --image-uri ${{ steps.current-image.outputs.prev_image_uri }} \
+              --region ${{ env.AWS_REGION }}
+            aws lambda wait function-updated \
+              --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+              --region ${{ env.AWS_REGION }}
+            echo "🔄 Rollback completed successfully."
+            exit 1
+          fi
+
+          echo "✅ Smoke test passed! Deployment verified."

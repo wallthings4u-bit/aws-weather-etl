@@ -66,6 +66,45 @@ def fetch_weather_data() -> list[dict]:
     return response.json()
 
 
+def validate_weather_data(df: pd.DataFrame) -> None:
+    """S3格納前の動的データ品質チェック（都市・項目の追加に自動追従）"""
+    # 1. レコード件数チェック（CITIESマスタの件数と動的に一致するか）
+    if len(df) != len(CITIES):
+        raise ValueError(
+            f"Data Quality Error: 取得件数({len(df)})が対象都市数({len(CITIES)})と不一致です"
+        )
+
+    # 2. 都市名の重複・欠落チェック
+    expected_cities = {c["name"] for c in CITIES}
+    actual_cities = set(df["city"].tolist())
+    if actual_cities != expected_cities:
+        raise ValueError(
+            f"Data Quality Error: 都市リストが不一致です (差分: {expected_cities ^ actual_cities})"
+        )
+
+    # 3. 全カラム共通の欠損（NULL / NaN）チェック（新規追加項目も自動で検証対象）
+    if df.isnull().any().any():
+        null_cols = df.columns[df.isnull().any()].tolist()
+        raise ValueError(f"Data Quality Error: 欠損値(NULL)が検出されました: {null_cols}")
+
+    # 4. 気象データのドメイン値・整合性チェック（対象カラムが存在する場合のみ検証）
+    if "temp_max" in df.columns and "temp_min" in df.columns:
+        if not df["temp_max"].between(-50.0, 50.0).all() or not df["temp_min"].between(-50.0, 50.0).all():
+            raise ValueError("Data Quality Error: 気温が許容範囲(-50℃〜50℃)外です")
+        if (df["temp_max"] < df["temp_min"]).any():
+            raise ValueError("Data Quality Error: 最高気温が最低気温を下回っています")
+
+    if "precipitation_sum" in df.columns:
+        if (df["precipitation_sum"] < 0.0).any():
+            raise ValueError("Data Quality Error: 降水量が負の値になっています")
+
+    if "humidity_mean" in df.columns:
+        if not df["humidity_mean"].between(0.0, 100.0).all():
+            raise ValueError("Data Quality Error: 平均湿度が許容範囲(0%〜100%)外です")
+
+    logger.info("Data quality validation passed successfully (%d records).", len(df))
+
+
 def transform_to_parquet(raw_data: list[dict], now_jst: datetime) -> tuple[str, bytes]:
     """APIレスポンスをPandas DataFrame経由でParquetバイナリ（Snappy圧縮）に変換する"""
     records = []
@@ -102,6 +141,9 @@ def transform_to_parquet(raw_data: list[dict], now_jst: datetime) -> tuple[str, 
 
     df = pd.DataFrame(records)
 
+    # S3格納前のデータ品質チェックを実行
+    validate_weather_data(df)
+
     # メモリ上のバッファにParquet形式で書き出し（Snappy圧縮）
     parquet_buffer = io.BytesIO()
     df.to_parquet(parquet_buffer, engine="pyarrow", compression="snappy", index=False)
@@ -116,7 +158,7 @@ def lambda_handler(event, context):
     # 1. 外部APIからデータ取得
     raw_data = fetch_weather_data()
 
-    # 2. Parquet形式へ変換
+    # 2. データ品質検証 ＆ Parquet形式へ変換
     target_date, parquet_bytes = transform_to_parquet(raw_data, now_jst)
     year, month, day = target_date.split("-")
 
